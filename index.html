@@ -397,6 +397,21 @@
   }
   footer .col a { display: block; text-decoration: none; margin-bottom: 8px; color: var(--ink-soft); }
   footer .col a:hover { color: var(--ink); }
+
+  /* ---- Planeador de bacheo (Assignment 2) ---- */
+  .planner { display:grid; grid-template-columns: 1fr 1fr; gap: 24px; background: var(--surface); border:1px solid var(--line); border-radius: 18px; padding: 28px; box-shadow: var(--shadow); }
+  @media (max-width: 820px) { .planner { grid-template-columns: 1fr; } }
+  .planner form { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .planner label { display:flex; flex-direction:column; gap:6px; font-size:.9rem; color: var(--ink-soft); }
+  .planner label.full { grid-column: 1 / -1; }
+  .planner input, .planner select { font: inherit; padding: 10px 12px; border-radius: 10px; border:1px solid var(--line-strong); background: var(--bg); color: var(--ink); }
+  .planner .btn { grid-column: 1 / -1; justify-self:start; cursor:pointer; }
+  .planner .out { background: var(--surface-2); border-radius: 14px; padding: 20px; min-height: 220px; }
+  .planner .big { font-family: 'IBM Plex Mono', monospace; font-size: 1.6rem; color: var(--ink); margin: 4px 0 12px; }
+  .planner .days { display:grid; grid-template-columns: repeat(3,1fr); gap:10px; margin-top:10px; }
+  .planner .day { background: var(--surface); border:1px solid var(--line); border-radius: 10px; padding:10px; text-align:center; font-size:.9rem; }
+  .planner .day.ok { border-color: var(--accent); }
+  .planner .err { color: var(--accent); }
 </style>
 
 <header class="nav">
@@ -610,6 +625,34 @@
   </div>
 </section>
 
+<section class="wrap" id="bacheo">
+  <div class="sec-head">
+    <span class="eyebrow">Planeador de bacheo</span>
+    <h2>Calcula tu mezcla y el mejor día para bachear</h2>
+  </div>
+  <div class="planner">
+    <form id="bacheo-form">
+      <label class="full">Ciudad
+        <select id="b-ciudad">
+          <option value="19.4326,-99.1332">Ciudad de México</option>
+          <option value="19.2826,-99.6557">Toluca</option>
+          <option value="19.0414,-98.2063">Puebla</option>
+          <option value="20.6597,-103.3496">Guadalajara</option>
+          <option value="25.6866,-100.3161">Monterrey</option>
+        </select>
+      </label>
+      <label>Largo del bache (cm)<input id="b-largo" type="number" min="1" step="any" required value="60"></label>
+      <label>Ancho del bache (cm)<input id="b-ancho" type="number" min="1" step="any" required value="40"></label>
+      <label>Profundidad (cm)<input id="b-prof" type="number" min="1" step="any" required value="5"></label>
+      <label>Número de baches<input id="b-num" type="number" min="1" step="1" required value="3"></label>
+      <button class="btn btn-primary" type="submit">Calcular</button>
+    </form>
+    <div class="out" id="bacheo-out" aria-live="polite">
+      <p>Ingresa las medidas y elige tu ciudad. Calculamos el volumen y las toneladas de mezcla asfáltica, y consultamos el pronóstico de lluvia de los próximos 3 días.</p>
+    </div>
+  </div>
+</section>
+
 <section class="wrap" id="contacto">
   <div class="cta-band">
     <h2>Consigue una cotización con tu distribuidor más cercano</h2>
@@ -643,3 +686,46 @@
     </div>
   </div>
 </footer>
+
+<script>
+// Planeador de bacheo: cálculo de mezcla + pronóstico de lluvia (API Open-Meteo, sin llave)
+const DENSIDAD_MEZCLA_T_M3 = 2.35; // t/m³ de mezcla asfáltica compactada (verificar con el proveedor)
+const UMBRAL_LLUVIA = 40;          // % máximo de probabilidad de lluvia para recomendar un día
+
+function calcularMezcla(largoCm, anchoCm, profCm, num) {
+  const volumen = (largoCm / 100) * (anchoCm / 100) * (profCm / 100) * num; // m³
+  return { volumen, toneladas: volumen * DENSIDAD_MEZCLA_T_M3 };
+}
+
+async function pronostico(lat, lon) {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=precipitation_probability_max&timezone=auto&forecast_days=3`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('Open-Meteo respondió ' + r.status);
+  const d = await r.json();
+  return d.daily.time.map((t, i) => ({ fecha: t, prob: d.daily.precipitation_probability_max[i] }));
+}
+
+document.getElementById('bacheo-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const out = document.getElementById('bacheo-out');
+  const v = id => parseFloat(document.getElementById(id).value);
+  const [lat, lon] = document.getElementById('b-ciudad').value.split(',');
+  const ciudad = document.getElementById('b-ciudad').selectedOptions[0].text;
+  const { volumen, toneladas } = calcularMezcla(v('b-largo'), v('b-ancho'), v('b-prof'), v('b-num'));
+  let html = `<div>Volumen total</div><div class="big">${volumen.toFixed(3)} m³</div>
+              <div>Mezcla asfáltica estimada</div><div class="big">${toneladas.toFixed(3)} t (${Math.round(toneladas*1000)} kg)</div>`;
+  out.innerHTML = html + '<p>Consultando pronóstico…</p>';
+  try {
+    const dias = await pronostico(lat, lon);
+    const bueno = dias.find(d => d.prob !== null && d.prob < UMBRAL_LLUVIA);
+    html += `<div>Probabilidad máxima de lluvia en ${ciudad}</div><div class="days">` +
+      dias.map(d => `<div class="day${bueno && d.fecha === bueno.fecha ? ' ok' : ''}">${d.fecha}<br><b>${d.prob ?? '–'}%</b></div>`).join('') + '</div>';
+    html += bueno
+      ? `<p><b>Día recomendado: ${bueno.fecha}</b> (lluvia &lt; ${UMBRAL_LLUVIA}%).</p>`
+      : `<p><b>No recomendamos bachear en los próximos 3 días:</b> todos superan ${UMBRAL_LLUVIA}% de probabilidad de lluvia.</p>`;
+  } catch (err) {
+    html += `<p class="err">No se pudo consultar el pronóstico (${err.message}). El cálculo de mezcla sí es válido.</p>`;
+  }
+  out.innerHTML = html;
+});
+</script>
